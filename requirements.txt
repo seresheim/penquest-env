@@ -1,0 +1,6 @@
+asyncio>=3.4.3
+gymnasium>=0.29
+websockets>=12.0
+bidict
+
+penquest-pkgs @ git+https://github.com/seresheim/penquest-pkgs.git

@@ -1,0 +1,10 @@
+data/
+.venv/
+
+.env
+logs/
+
+*.egg-info
+
+dist/
+build/
