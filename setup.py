@@ -13,7 +13,8 @@ setup(
         "asyncio>=3.4.3",
         "gymnasium>=1.1.1",
         "websockets>=12.0",
-        "penquest-pkgs>=0.2.0",
+        "penquest-pkgs==0.2.1",
+        "bidict>=0.23.1",
     ],
     classifiers=[""]
 )
