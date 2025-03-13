@@ -3,14 +3,20 @@ from enum import Enum
 from bidict import bidict
 
 from penquest_pkgs.model import (
-    GameState,
-    Action,
-    Actor,
-    Effect,
-    Asset,
-    Equipment,
-    ActionTemplate,
-    EquipmentTemplate
+    GameStateModel,
+    ActionModel,
+    ActorModel,
+    EffectModel,
+    AssetModel,
+    EquipmentModel,
+    ActionTemplateModel,
+    EquipmentTemplateModel
+)
+from penquest_pkgs.constants import (
+    GoalType,
+    ActorType,
+    ScopeType,
+    TimingType,
 )
 
 import numpy as np
@@ -106,21 +112,6 @@ DEFENSE_EQUIPMENT = {4, 9, 10, 11, 12}
 LOCAL_EQUIPMENT = {6, 7, 8, 10, 11, 12}
 GLOBAL_EQUIPMENT = {5, 9}
 
-class ActorTypes(Enum):
-    Null = 0
-    Attack = 1
-    Defense = 2
-
-class ScopeTypes(Enum):
-    Null = 0
-    Local = 1
-    Global = 2
-
-class TimingTypes(Enum):
-    Null = 0
-    Single_Use = 1
-    Permanent = 2
-
 class ObservationFactory():
 
     def __init__(self):
@@ -150,7 +141,7 @@ class ObservationFactory():
         return self._get_id(asset_id, self.asset_id_mapping)
         
     
-    def create_observation(self, game_state: GameState) -> Dict:
+    def create_observation(self, game_state: GameStateModel) -> Dict:
         role_obs = tuple([
             self._create_actor_obs(actor, conn_key) 
             for conn_key, actor in game_state.roles.items()
@@ -179,8 +170,8 @@ class ObservationFactory():
 
         return  {
                 "turn": game_state.turn,
-                "phase": game_state.external_phase.value,
-                "actor_connection_id": self._get_conn_id(game_state.actor_connection_id),
+                "phase": game_state.game_phase,
+                "connection_id": self._get_conn_id(game_state.connection_id),
                 "actor_id": actor_id,
                 "roles": role_obs,
                 "hand": action_obs,
@@ -188,68 +179,73 @@ class ObservationFactory():
                 "board": asset_obs,
                 "shop": shop_obs,
                 "selection_choices": selection_obs,
-                "selection_amount": game_state.selection_amount
+                "selection_amount": game_state.selection_amount if game_state.selection_amount > 0 else 0,
             }
     
-    def _create_actor_obs(self, actor: Actor, conn_str:str):
+    def _create_actor_obs(self, actor: ActorModel, conn_str:str):
         actor_obs = {
-            "connection_id": self._get_conn_id(conn_str),
             "id": self._get_actor_id(actor.id),
+            "connection_id": self._get_conn_id(conn_str),
             "type": MAP_ACTOR_TYPE.get(actor.type, 0),
             "soph": int(actor.soph) if actor.soph is not None else 0,
             "det": int(actor.det) if actor.soph is not None else 0,
             "wealth": int(actor.wealth) if actor.soph is not None else 0,
-            "ini": int(actor.ini) if actor.soph is not None else 0,
             "ins": int(actor.ins) if actor.soph is not None else 0,
+            "ini": int(actor.ini) if actor.soph is not None else 0,
             "credits": np.array([actor.credits], dtype=np.float32) if actor.soph is not None else np.array([0.0], dtype=np.float32),
             "mission_description": actor.mission_description if actor.mission_description is not None else "",
-            "goal_descriptions": tuple(actor.goal_descriptions) if actor.soph is not None else tuple(),
+            "goal_description": actor.goal_description if actor.soph is not None else "",
             "goals": tuple(),
-            "assets": tuple()
+            "assets": tuple(),
         }
-        goals = []
+        or_goal_obs = []
         if actor.goals is not None:
-            for goal in actor.goals:
-                if goal.type == "asset_goal":
-                    goal_obs = {
-                        "type": MAP_GOAL_TYPES.get(goal.type, 0),
-                        "asset_id": goal.asset.id,
-                        "damage": np.array(goal.damage),
-                        "exposed": goal.exposed,
-                        "attack_stage": MAP_ATTACK_STAGES[goal.attack_stage] if goal.attack_stage is not None else 0,
-                        "credits": np.array([0.0], dtype=np.float32),
-                        "ins": 0,
-                        "defender": 0
-                    }
-                elif goal.type == "actor_goal":
-                    goal_obs = {
-                        "type": MAP_GOAL_TYPES.get(goal.type, 0),
-                        "asset_id": 0,
-                        "damage": np.array([]),
-                        "exposed": (False, False, False),
-                        "attack_stage": 0,
-                        "credits": goal.credits,
-                        "ins": goal.ins,
-                        "defender": 0
-                    }
-                elif goal.type =="defender_not_exceeded_goal":
-                    goal_obs = {
-                        "type": MAP_GOAL_TYPES.get(goal.type, 0),
-                        "asset_id": 0,
-                        "damage": np.array([]),
-                        "exposed": (False, False, False),
-                        "attack_stage": 0,
-                        "credits": goal.credits,
-                        "ins": goal.ins,
-                        "defender": goal.defender
-                    }
-                goals.append(goal_obs)
-            actor_obs["goals"] = tuple(goals)
+            for and_goals in actor.goals:
+                and_goal_obs = []
+                for goal in and_goals:
+                    if goal.type == GoalType.ASSET_GOAL:
+                        goal_obs = {
+                            "type": MAP_GOAL_TYPES.get(goal.type, 0),
+                            "asset_id": goal.asset.id,
+                            "damage": np.array(goal.damage),
+                            "exposed": goal.exposed,
+                            "attack_stage": MAP_ATTACK_STAGES[goal.attack_stage] if goal.attack_stage is not None else 0,
+                            "credits": np.array([0.0], dtype=np.float32),
+                            "ins": 0,
+                            "defender": 0
+                        }
+                    elif goal.type == GoalType.ACTOR_GOAL:
+                        goal_obs = {
+                            "type": MAP_GOAL_TYPES.get(goal.type, 0),
+                            "asset_id": 0,
+                            "damage": np.array([]),
+                            "exposed": (False, False, False),
+                            "attack_stage": 0,
+                            "credits": goal.credits,
+                            "ins": goal.ins,
+                            "defender": 0
+                        }
+                    elif goal.type == GoalType.DEFENDER_NOT_EXCEED_ACTOR_GOAL:
+                        goal_obs = {
+                            "type": MAP_GOAL_TYPES.get(goal.type, 0),
+                            "asset_id": 0,
+                            "damage": np.array([]),
+                            "exposed": (False, False, False),
+                            "attack_stage": 0,
+                            "credits": goal.credits,
+                            "ins": goal.ins,
+                            "defender": goal.defender
+                        }
+                    else:
+                        raise ValueError(f"Unknown goal type: {goal.type}")
+                    and_goal_obs.append(goal_obs)
+                or_goal_obs.append(tuple(and_goal_obs))
+            actor_obs["goals"] = tuple(or_goal_obs)
         if actor.assets is not None:
             actor_obs["assets"] = tuple([asset.id for asset in actor.assets])
         return actor_obs
 
-    def _create_action_obs(self, action: Union[Action,ActionTemplate]):
+    def _create_action_obs(self, action: Union[ActionModel,ActionTemplateModel]):
         action_obs = {
             #"type": MAP_ACTION_TYPES.get(action.type, 0), 
             "card_type": MAP_ACTION_CARD_TYPES.get(action.card_type, 0),
@@ -267,15 +263,14 @@ class ObservationFactory():
             "detection_chance": np.array([0.0], dtype=np.float32),
             "detection_chance_failed": np.array([0.0], dtype=np.float32),
             "predefined_attack_mask": "",
-            "transfer_effects": tuple(),
             "def_type": int(action.def_type) if action.def_type is not None else 0,
             "possible_actions": tuple(),
             "requires_attack_mask": int(action.requires_attack_mask)+1 if action.requires_attack_mask is not None else 0,
             "soph_requirement": action.soph_requirement,
         }
-        if isinstance(action, Action):
+        if isinstance(action, ActionModel):
             action_obs["template_id"] = self._get_action_template_id(action.template_id)
-        elif isinstance(action, ActionTemplate):
+        elif isinstance(action, ActionTemplateModel):
             action_obs["template_id"] = self._get_action_template_id(action.id)
         else:
             raise ValueError(f"Unknon action type: {type(action)}")
@@ -289,11 +284,6 @@ class ObservationFactory():
             action_obs["detection_chance_failed"] = np.array([action.detection_chance_failed], dtype=np.float32)
         if action.predefined_attack_mask is not None:
             action_obs["predefined_attack_mask"] = action.predefined_attack_mask
-        if action.transfer_effects is not None:
-            action_obs["transfer_effects"] = tuple(
-                self._create_effect_obs(effect) 
-                for effect in action.transfer_effects
-            )
         if action.def_type is not None:
             action_obs["def_type"] = action.def_type
         
@@ -303,7 +293,7 @@ class ObservationFactory():
             )
         return action_obs
     
-    def _create_effect_obs(self, effect: Effect):
+    def _create_effect_obs(self, effect: EffectModel):
         effect_obs = {
             "type": MAP_EFFECT_TYPES.get(effect.type, 0),
             "scope": MAP_SCOPE_TYPES.get(effect.scope, 0),
@@ -336,50 +326,44 @@ class ObservationFactory():
             ])
         return effect_obs
 
-    def _create_equipment_obs(self, equipment: Union[Equipment, EquipmentTemplate]):
+    def _create_equipment_obs(self, equipment: Union[EquipmentModel, EquipmentTemplateModel]):
         equipment_obs = {
             "type": MAP_EQUIPMENT_TYPES.get(equipment.type, 0),
             "effects": tuple(
                 [self._create_effect_obs(eff) for eff in equipment.effects]
             ) if equipment.effects is not None else tuple(),
-            "transfer_effects": tuple(
-                [
-                    self._create_effect_obs(eff) 
-                    for eff in equipment.transfer_effects
-                ]
-            ) if equipment.transfer_effects is not None else tuple(),
             "price": np.array([equipment.price], dtype=np.float32),
             "impact": np.array(equipment.impact) if equipment.impact is not None else np.array([0, 0, 0]),
             "possible_actions": tuple(
                 [self._get_action_template_id(x) for x in equipment.possible_actions]
             ) if equipment.possible_actions is not None else tuple()
         }
-        if isinstance(equipment, Equipment):
+        if isinstance(equipment, EquipmentModel):
             equipment_obs["active"] = int(equipment.active) + 1
         else:
             equipment_obs["active"] = 0
         eq_type_id = MAP_EQUIPMENT_TYPES.get(equipment.type, 0)
         if eq_type_id in ATTACK_EQUIPMENT:
-            equipment_obs["actor_type"] = ActorTypes.Attack.value
+            equipment_obs["actor_type"] = ActorType.ATTACK
         elif eq_type_id in DEFENSE_EQUIPMENT:
-            equipment_obs["actor_type"] = ActorTypes.Defense.value
+            equipment_obs["actor_type"] = ActorType.DEFENCE
         else:
-            equipment_obs["actor_type"] = ActorTypes.Null.value
+            equipment_obs["actor_type"] = 0
         if eq_type_id in SINGLE_USE_EQUIPMENT:
-            equipment_obs["timing_type"] = TimingTypes.Single_Use.value
+            equipment_obs["timing_type"] = TimingType.SINGLE_USE
         elif eq_type_id in PERMANENT_EQUIPMENT:
-            equipment_obs["timing_type"] = TimingTypes.Permanent.value
+            equipment_obs["timing_type"] = TimingType.PERMANENT
         else:
-            equipment_obs["timing_type"] = TimingTypes.Null.value
+            equipment_obs["timing_type"] = 0
         if eq_type_id in LOCAL_EQUIPMENT:
-            equipment_obs["scope_type"] = ScopeTypes.Local.value
+            equipment_obs["scope_type"] = ScopeType.LOCAL
         elif eq_type_id in GLOBAL_EQUIPMENT:
-            equipment_obs["scope_type"] = ScopeTypes.Global.value
+            equipment_obs["scope_type"] = ScopeType.GLOBAL
         else:
-            equipment_obs["scope_type"] = ScopeTypes.Null.value
+            equipment_obs["scope_type"] = 0
         return equipment_obs
     
-    def _create_asset_obs(self, asset: Asset) -> Dict:
+    def _create_asset_obs(self, asset: AssetModel) -> Dict:
         asset_obs = {
             "id": self._get_asset_id(asset.id),
             "category": asset.category,
@@ -387,7 +371,7 @@ class ObservationFactory():
             "attack_stage": asset.attack_stage,
             "parent_asset": 0,
             "child_assets": tuple(asset.child_assets),
-            "exposed": asset.exposed,
+            "exposed": np.array(asset.exposed.to_mulit_binary()),
             "damage": np.array(asset.damage),
             "attack_vectors": tuple(asset.attack_vectors) if asset.attack_vectors is not None else tuple(),
             "dependencies": tuple(asset.dependencies) if asset.dependencies is not None else tuple(),

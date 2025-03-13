@@ -44,7 +44,10 @@ def start(
     """
     if config_file_path is None:
         full_path = os.path.dirname(os.path.abspath(__file__))
-        full_path = full_path.replace("/penquest_env/network", "/")
+        full_path = full_path.replace(
+            f"{os.path.sep}penquest_env{os.path.sep}network", 
+            f"{os.path.sep}"
+        )
         config_file_path = os.path.join(full_path, DEFAULT_CONFIG_FILE)
 
     config = configparser.ConfigParser()

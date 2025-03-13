@@ -1,10 +1,8 @@
 import os
 import asyncio
-import gymnasium as gym
-import numpy as np
+from itertools import permutations, combinations
+from typing import Dict, Optional, Tuple, Set, Any
 
-from itertools import permutations
-from typing import Dict, Optional, Tuple, Set, List, Any
 from gymnasium.spaces import (
     Discrete,
     Sequence,
@@ -13,60 +11,35 @@ from gymnasium.spaces import (
     MultiDiscrete,
     MultiBinary
 )
+import gymnasium as gym
+import numpy as np
+from penquest_pkgs.constants import (
+    GameEndedState,
+    GameInteractionType,
+    MAX_ITEMS_PER_BUY,
+)
+from penquest_pkgs.game import Game
+from penquest_pkgs.utils import get_logger
+from penquest_pkgs.constants import GamePhase, InitActionsMode
+from penquest_pkgs.model import GameOptionsModel as GameOptions
+
+from penquest_env.constants import BotType, PlayerType, OptionFields, SlotType
 from penquest_env.ConnectionHelper import ConnectionHelper
 from penquest_env.ObservationFactory import ObservationFactory
 
-from penquest_pkgs.constants import GameEndedState, GameInteractionType
-from penquest_pkgs.game import Game
-from penquest_pkgs.utils import get_logger
-
-
-HUMAN_PLAYER = 'human'
-DEFAULT_SCENARIO = 9
-
-class GameConfig():
-    PLAYER_ID = "player_id"
-    LOBBY = "lobby"
-    JOIN = "join"
-    SCENARIO_ID = "scenario_id"
-    OPTIONS = "options"
-    SLOT = "slot"
-    PLAYERS = "players"
-    TYPE = "type"
-    BOT_TYPE = "bot_type"
-    WAIT_FOR_PLAYERS = "wait_for_players"
-
-
-DEFAULT_WAIT_FOR_PLAYERS_PERIOD = 240
+DEFAULT_WAIT_FOR_PLAYERS_PERIOD = 30
 MAX_AMOUNT_OF_TURNS = int(1e10)
 MAX_AMOUNT_OF_ACTORS_IN_GAME = 64
 MAX_AMOUNT_SELECTION = 20
 MAX_AMOUNT_OF_ASSETS = int(1e10)
-MAX_AMOUNT_OF_ACTIONS = int(1e10)
 MAX_AMOUNT_OF_ACTION_TEMPLATES = int(1e10)
-MAX_AMOUNT_OF_EQUIPMENT_TEMPLATES = int(1e10)
 MAX_AMOUNT_OF_ASSET_CATEGORIES = 20
-MAX_EFFECT_CATEGORIES = 100000
 AMOUNT_OF_EFFECT_TYPES = 10
 MAX_AMOUNT_OF_GOAL_TYPES = 4
 MAX_AMOUNT_OF_OSES = 7
 MAX_AMOUNT_OF_ATTACK_STAGES = 4
 
-ATTACK_MASKS = [
-    "",
-    "C",
-    "I",
-    "A",
-    "CI",
-    "IA",
-    "CA",
-    "CIA"
-]
-
 CHARSET ="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,;.:-_^°!\"§$%&/()=?\\'# *~<>| "
-
-KEY_INITIAL_ACTION_MODE = "initial_action_mode"
-KEY_EQUIPMENT_SHOP_MODE = "equipment_shop_mode"
 
 DEFAULT_CONFIG_FILE = "default_config.ini"
 
@@ -182,7 +155,7 @@ class PenQuestEnv(gym.Env):
     :`roles`: Sequence(Dict(...)) - each dict in the sequence models a single 
         actor role.
     :`actor_id`: Discrete(64) - ID of a player in the game.
-    :`actor_connection_id`: Text(max_len=50) - unique identifier for the
+    :`connection_id`: Text(max_len=50) - unique identifier for the
         connection to the game (not the websocket connection!) This is 
         necessary, because the actors can play against themselves, thus the
         actor_id alone is not enough.
@@ -379,10 +352,6 @@ class PenQuestEnv(gym.Env):
         :1: does not require an attack mask from the player, it is pre-defined
         :2: the player can provide an attack mask 
 
-    :`transfer_effects`: Sequence(Dict(...)) - A sequence of dictionary spaces, 
-        reselmbling effects, elements of the effect space, that transfer onto a
-        main action cards and are activated from their context. This field is 
-        usually only set with support action cards.
     :`possible_actions`: Sequence(Discrete(1e10)) - A sequence of integers,
         resembling action template IDs that indicate which support action card
         is compatible with which main action card. This field is usually only
@@ -443,10 +412,6 @@ class PenQuestEnv(gym.Env):
 
     :`effects`: Sequence(Dict(...)) - list of effect dictionaries of all effects
         the equipment has.
-    :`transfer_effects`: Sequence(Dict(...)) - list of effect dictionaries 
-        of all transfer effects that the equipment has. Transfer effects move
-        to the main action and are later executed in the context of the main
-        action instead of the equipment.
     :`price`: Box(-100.0, 100.0, dtype=np.float32) - price of the equipment.
     :`possible_actions`: Sequence(Discrete(1e10)) - sequence of possible action 
         card IDs that the equipment can be played alongside with.
@@ -590,9 +555,9 @@ class PenQuestEnv(gym.Env):
         equipment may bring an attacker credits.
     :mission_description: Text(max_len=5000) - a short description about the
         mission of the player.
-    :goal_descriptions: Sequence(Text(max_len=2000) - a seuqences of strings
-        that individually describe the goals of the attacker within the 
-        scenario. This field is only relevant for attackers.
+    :goal_description: Text(max_len=2000 - a string that describes the goals of 
+        the attacker within the scenario. This field is only relevant for 
+        attackers.
     :goals: Sequence(Dict(...)) - A sequence of dicitonaroies of goals an
         attacker needs to achieve in order to win the game of the following
         format: 
@@ -703,10 +668,11 @@ class PenQuestEnv(gym.Env):
     metadata: Dict[str, Any] = {"render_modes":[]}
 
     def __init__(
-            self, 
-            options: Dict, 
-            render_mode: Optional[str]=None, 
-            config_file_path: str=None
+            self,
+            options: Dict[str, Any],
+            render_mode: Optional[str]=None,
+            config_file_path: str=None,
+            single_turn: bool=True,
         ):
         """Initializes all attributes
 
@@ -724,19 +690,18 @@ class PenQuestEnv(gym.Env):
 
         if config_file_path is None:
             full_path = os.path.dirname(os.path.abspath(__file__))
-            full_path = full_path.replace("/penquest_env/penquest_env", "/penquest_env")
+            full_path = full_path.replace(
+                f"{os.path.sep}penquest_env{os.path.sep}penquest_env",
+                f"{os.path.sep}penquest_env"
+            )
             config_file_path = os.path.join(full_path, DEFAULT_CONFIG_FILE)
 
         self.config_file_path = config_file_path
-        self.options = options if options is not None else dict()
-        if self.options.get(KEY_INITIAL_ACTION_MODE, 0) == 1:
+        self.options = options
+        game_options = self.options.get(OptionFields.GAME_OPTIONS, GameOptions())
+        if game_options.initial_action_mode == InitActionsMode.PICK:
             raise RuntimeError(
                 "Initial Action Mode 1 is currently not supported in the "
-                "environment"
-            )
-        if self.options.get(KEY_EQUIPMENT_SHOP_MODE, 1) == 2:
-            raise RuntimeError(
-                "Equipment Shop Mode 2 is currently not supported in the "
                 "environment"
             )
 
@@ -746,6 +711,7 @@ class PenQuestEnv(gym.Env):
         self.reward_range = (-1.0, 1.0)
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
+        self.single_turn = single_turn
 
         # These need to be set in reset() because they depend on the game
         self.game: Game = None
@@ -772,22 +738,26 @@ class PenQuestEnv(gym.Env):
                     max_length=5000,
                     charset=CHARSET
                 ),
-                "goal_descriptions": Sequence(
-                    Text(min_length=0, max_length=2000, charset=CHARSET)
+                "goal_description": Text(
+                    min_length=0,
+                    max_length=2000,
+                    charset=CHARSET
                 ),
                 # Only relevant for attackers
                 "goals": Sequence(
-                    gym.spaces.Dict({
-                        "type": Discrete(MAX_AMOUNT_OF_GOAL_TYPES),
-                        "asset_id": Discrete(MAX_AMOUNT_OF_ASSETS),
-                        "damage": MultiDiscrete(nvec=[4, 4, 4]),
-                        "exposed": MultiBinary(3),
-                        "attack_stage": Discrete(4),
-                        "credits": Box(low=0.0, high=30.0, dtype=np.float32),
-                        "ins": Discrete(10),
-                        "defender": Discrete(MAX_AMOUNT_OF_ACTORS_IN_GAME),
-                    })
-                ), 
+                    Sequence(
+                        gym.spaces.Dict({
+                            "type": Discrete(MAX_AMOUNT_OF_GOAL_TYPES),
+                            "asset_id": Discrete(MAX_AMOUNT_OF_ASSETS),
+                            "damage": MultiDiscrete(nvec=[4, 4, 4]),
+                            "exposed": MultiBinary(3),
+                            "attack_stage": Discrete(4),
+                            "credits": Box(low=0.0, high=30.0, dtype=np.float32),
+                            "ins": Discrete(10),
+                            "defender": Discrete(MAX_AMOUNT_OF_ACTORS_IN_GAME),
+                        })
+                    )
+                ),
                 # Only relevant for defenders
                 "assets": Sequence(Discrete(MAX_AMOUNT_OF_ASSETS))
             }
@@ -816,7 +786,6 @@ class PenQuestEnv(gym.Env):
             "timing_type": Discrete(3), # permanent equipment or single use
             "scope_type": Discrete(3), # global equipment or local
             "effects": Sequence(no_equipment_effect_space),
-            "transfer_effects": Sequence(no_equipment_effect_space),
             "price": Box(-100.0, 100.0, dtype=np.float32),
             "possible_actions": Sequence(Discrete(MAX_AMOUNT_OF_ACTION_TEMPLATES)),
             "impact": MultiDiscrete(nvec=[7, 7, 7], start=[-3, -3, -3]),
@@ -842,7 +811,6 @@ class PenQuestEnv(gym.Env):
             "timing_type": Discrete(3), # permanent equipment or single use
             "scope_type": Discrete(3), # global equipment or local
             "effects": Sequence(self.effect_space),
-            "transfer_effects": Sequence(self.effect_space),
             "price": Box(-100.0, 100.0, dtype=np.float32),
             "possible_actions": Sequence(Discrete(MAX_AMOUNT_OF_ACTION_TEMPLATES)),
             "impact": MultiDiscrete(nvec=[7, 7, 7], start=[-3, -3, -3]),
@@ -871,7 +839,6 @@ class PenQuestEnv(gym.Env):
                 charset="CIA"
             ),
             "requires_attack_mask": gym.spaces.Discrete(3),
-            "transfer_effects": Sequence(self.effect_space),
             "possible_actions": Sequence(Discrete(MAX_AMOUNT_OF_ACTION_TEMPLATES))
         })
         
@@ -896,7 +863,7 @@ class PenQuestEnv(gym.Env):
                 "turn": Discrete(MAX_AMOUNT_OF_TURNS),
                 "phase": Discrete(6),
                 "actor_id": Discrete(MAX_AMOUNT_OF_ACTORS_IN_GAME),
-                "actor_connection_id": Discrete(MAX_AMOUNT_OF_ACTORS_IN_GAME),
+                "connection_id": Discrete(MAX_AMOUNT_OF_ACTORS_IN_GAME),
                 "roles": Sequence(self.actor_space),
                 "hand": Sequence(self.actions_space),
                 "equipment": Sequence(self.equipment_space),
@@ -947,29 +914,50 @@ class PenQuestEnv(gym.Env):
 
     async def _get_valid_actions(self) -> Set[Tuple[int]]:
         valid_actions = []
+
         if self.last_interaction_type == GameInteractionType.SHOPPING_PHASE:
             role = self.game.get_player_role()
-            def add_affordable_item(all_items: List, limit:float, current_selection):
-                valid_selections = []
-                current_sum = sum([item.price for item in current_selection])
-                if all([item in current_selection or current_sum + item.price > limit for item in all_items]):
-                    return [tuple([all_items.index(item) for item in current_selection])]
-                for item in all_items:
-                    if item not in current_selection and current_sum + item.price <= limit:
-                        valid_selections += add_affordable_item(all_items, limit, current_selection+[item])
-                return valid_selections
+
+            # Due to combinatorial explosion, we limit the number of items that
+            # are included in the valid actions to 3. This does not mean that
+            # the agent can only buy 3 items, but that the agent has to calculate
+            # itself whether it can buy more than 3 items.
+
+            def find_combinations_within_limit(equipment_list, limit):
+                indices = range(len(equipment_list))
+                prices = [equipment.price for equipment in equipment_list]
+                
+                valid_combinations = []
+                
+                for r in range(len(equipment_list) + 1):
+                    if r > MAX_ITEMS_PER_BUY:
+                        break
+                    for comb in combinations(indices, r):
+                        # Calculate the sum only if needed
+                        comb_sum = sum(prices[i] for i in comb)
+                        if comb_sum <= limit:
+                            valid_combinations.append(comb)
+                
+                return valid_combinations
 
             valid_actions = tuple(
-                add_affordable_item(self.game.game_state.shop, role.credits, [])
+                find_combinations_within_limit(
+                    self.game.game_state.shop, 
+                    role.credits
+                )
             )
         elif self.last_interaction_type == GameInteractionType.CHOOSE_ACTION:
             selection_len = len(self.game.game_state.selection_choices)
             selection_amount = self.game.game_state.selection_amount
             valid_actions = list(permutations(range(selection_len), selection_amount))
         elif self.last_interaction_type == GameInteractionType.PLAY_CARD:
-            valid_actions = await self.game.get_valid_actions()
+            if self.game.game_state is not None:
+                valid_actions = list(
+                    self.game.game_state.playable_actions.itertuples(index=False, name=None)
+                )
         else:
-            get_logger(__name__).error(
+            logger = self.game.logger if self.game is not None else get_logger(__name__)
+            logger.error(
                 f"Unknown interaction type {self.last_interaction_type}"
             )
         self.valid_actions = valid_actions
@@ -990,7 +978,7 @@ class PenQuestEnv(gym.Env):
         if get_valid_actions:
             valid_actions = await self._get_valid_actions()
         else:
-            valid_actions = {}
+            valid_actions = set()
         victory = False
         if self.game is not None:
             if self.game.game_state is not None:
@@ -1008,7 +996,7 @@ class PenQuestEnv(gym.Env):
             return 0.0
         return 1.0 if self.game.game_state.end_state == GameEndedState.WON else -1.0
 
-    def reset(self, seed:int=None, options:Dict={}):
+    def reset(self, seed:int=None, options: Dict[str, Any]=None) -> Tuple[Dict, Dict]:
         """_summary_
 
         Raises:
@@ -1038,6 +1026,7 @@ class PenQuestEnv(gym.Env):
             self.connector = ConnectionHelper(self.game)
             self.obs_factory = ObservationFactory()
             await self.connector.connect_to_server(self.config_file_path)
+            logger = self.game.logger if self.game is not None else get_logger(__name__)
 
             done = False
             while not done:
@@ -1049,44 +1038,52 @@ class PenQuestEnv(gym.Env):
 
                 # switch n case and handle different interaction types
                 if interaction_type == GameInteractionType.CREATE_OR_JOIN_LOBBY:
-                    get_logger(__name__).debug("Create or join lobby interaction")
+                    logger.debug("Create or join lobby interaction")
 
                     # check if lobby should be joined
-                    game_code = options.get('join', None)
-                    if game_code is not None:
-                        await self.game.join_game(game_code)
+                    if OptionFields.JOIN_CODE in options:
+                        join_code = options[OptionFields.JOIN_CODE]
+                        await self.game.join_game(join_code)
                     else: # else create lobby
-                        if 'scenarios' in options:
-                            scenarios = options['scenarios']
+                        if OptionFields.SCENARIOS in options:
+                            scenarios = options[OptionFields.SCENARIOS]
                             scenario = rand.choice(scenarios)
                         else:
-                            scenario = options.get('scenario', DEFAULT_SCENARIO)
+                            if OptionFields.SCENARIO not in options:
+                                raise ValueError(
+                                    "No scenario provided in options"
+                                )
+                            scenario = options[OptionFields.SCENARIO]
                         try:
+                            game_options = options.get(
+                                OptionFields.GAME_OPTIONS,
+                                GameOptions()
+                            )
                             await self.game.create_new_lobby(
-                                scenario, 
-                                options.get('game_options', dict())
+                                scenario,
+                                game_options
                             )
                         except asyncio.TimeoutError as e:
-                            get_logger(__name__).error(
+                            logger.error(
                                 f"Error while waiting for slot to be "
                                 f"changed in step {self.step_num}: {e}"
                             )
                             await self.game.close()
                             continue
                 elif interaction_type == GameInteractionType.CHANGE_LOBBY_PROPERTIES:
-                    get_logger(__name__).debug(
+                    logger.debug(
                         "Lobby properties interaction like adding players / "
                         "bots or chaning roles!"
                     )
 
                     # change slot of agent
-                    slot = options.get('slot', None)
+                    slot = options.get(OptionFields.SLOT, SlotType.ATTACK)
                     if slot is not None:
                         # TODO: Change to connection ID
                         current_own_slots = [
                             j 
                             for j, player in self.game.lobby.players.items() 
-                            if player.connection_id == self.game.actor_connection_id
+                            if player.connection_id == self.game.connection_id
                         ]
                         if len(current_own_slots) <= 0: 
                             raise ValueError(
@@ -1098,7 +1095,7 @@ class PenQuestEnv(gym.Env):
                             try:
                                 await self.game.change_slot(slot)
                             except asyncio.TimeoutError as e:
-                                get_logger(__name__).error(
+                                logger.error(
                                     f"Error while waiting for slot to be "
                                     f"changed in step {self.step_num} in game "
                                     f"{self.game.lobby.code}: {e}"
@@ -1107,50 +1104,60 @@ class PenQuestEnv(gym.Env):
                                 continue
 
                     # add bots and wait for players
-                    players_config = options.get('players', None)
-                    player_timeout = options.get(
-                        'wait_for_players', 
-                        DEFAULT_WAIT_FOR_PLAYERS_PERIOD
-                    )
-                    if players_config is not None:
+                    if OptionFields.PLAYERS in options:
+                        players = options[OptionFields.PLAYERS]
+                        wait_for_players_period = options.get(
+                            OptionFields.WAIT_FOR_PLAYERS,
+                            DEFAULT_WAIT_FOR_PLAYERS_PERIOD
+                        )
+                        bot_players = [
+                            player_dict
+                            for player_dict in players
+                            if OptionFields.TYPE in player_dict and player_dict[OptionFields.TYPE] == PlayerType.BOT
+                        ]
                         # add as many bots as in the config
-                        for bot in [it for it in players_config if it['type'] == 'bot']:
-                            await self.game.add_bot(bot_type=bot['bot_type'])
-                        
+                        for bot in bot_players:
+                            bot_type = bot.get(
+                                OptionFields.BOT_TYPE,
+                                BotType.RANDOM_BOT
+                            )
+                            await self.game.add_bot(bot_type=bot_type)
+
                         try:
                             await self.game.wait_for_players(
-                                len(players_config), 
-                                player_timeout
+                                len(players),
+                                wait_for_players_period
                             )
                         except asyncio.TimeoutError as e:
-                            get_logger(__name__).error(
+                            logger.error(
                                 f"Error while waiting for player in step "
                                 f"{self.step_num} in game "
                                 f"{self.game.lobby.code}: {e}"
                             )
                             await self.game.close()
-                    
+
                     # set seed
-                    seed = options.get('seed', None)
-                    if seed is not None:
+                    if OptionFields.SEED in options:
+                        seed = options[OptionFields.SEED]
                         await self.game.set_seed(seed)
 
-                    goal = options.get('goal', None)
-                    if goal is not None:
+                    # set goal
+                    if OptionFields.GOAL in options:
+                        goal = options[OptionFields.GOAL]
                         await self.game.set_goal(goal)
 
                 elif interaction_type == GameInteractionType.PLAYER_READY:
-                    get_logger(__name__).debug("Player ready interaction!")
+                    logger.debug("Player ready interaction!")
 
                     # set player ready to start the game
                     await self.game.set_player_readiness()
                     done = True
                     continue
                 elif interaction_type == GameInteractionType.END:
-                    get_logger(__name__).debug("Interactions ended!")
+                    logger.debug("Interactions ended!")
                     break
                 else:
-                    get_logger(__name__).error(
+                    logger.error(
                         f"Unknown interaction type {self.last_interaction_type}"
                     )
             if interaction_type != GameInteractionType.END:
@@ -1160,7 +1167,7 @@ class PenQuestEnv(gym.Env):
                 try:
                     info = await self._get_info()
                 except asyncio.TimeoutError as e:
-                    get_logger(__name__).error(
+                    logger.error(
                         f"Error while waiting for valid actions in step "
                         f"{self.step_num} in game {self.game.game_state.name}: "
                         f"{e}"
@@ -1187,9 +1194,10 @@ class PenQuestEnv(gym.Env):
         if len(equipment_ids) > 0:
             # Buy equipment command already has a flag that ends the shopping
             # phase
-            await self.game.buy_equipment(equipment_ids)
+            success = await self.game.buy_equipment(equipment_ids)
         else:
-            await self.game.finish_shopping()
+            success = await self.game.finish_shopping()
+        return success
 
     async def _choose_action(self, action: Tuple[int]):
         """Choses actions to draw from a pre-received offer of multiple possible
@@ -1202,32 +1210,42 @@ class PenQuestEnv(gym.Env):
         action_ids = [
             self.game.game_state.selection_choices[idx].id for idx in action
         ]
-        await self.game.selection_choose(action_ids)
+        success = await self.game.selection_choose(action_ids)
+        return success
 
-    async def _play_card(self, action: Tuple[int]):
+    async def _play_card(self, action: Tuple[int, int, int, int, int]):
         """Plays an action onto the specified target with the according attack
         mask supporting the specified support action and equipment
 
         :param action: tuple of integers that specify which 
-            action/support/equipment/target should be played; integers specify 
-            indices into the according lists (e.g. 'hand')
+            action/support/equipment/target should be played; 
+            Position meanings are as follows: 
+             0 - main action index in hand (starting with 0)
+             1 - target asset ID (0 = no target)
+             2 - attack mask index  
+             3 - support action index in hand (starting with 1, 0 no support 
+                 action)
+             4 - equipment index in equipment (starting with 1, 0 no equipment)
+             5 - response target ID (0 = no response target)
+            indices specify positions into the according lists (e.g. 'hand')
         """
-        main_action = self.game.game_state.hand[action[0]]
+        main_action_idx = action[0]
         target_asset_id = action[1] if action[1] > 0 else None
-        attack_mask = ATTACK_MASKS[action[2]]
-        if attack_mask == "":
-            attack_mask = main_action.predefined_attack_mask
-        support_action_ids = [self.game.game_state.hand[action[3]-1].id] if action[3] > 0 else None
-        equipment_ids = [self.game.game_state.equipment[action[4]-1].id] if action[4] > 0 else None
+        attack_mask = action[2]
+        support_action_idxs = [action[3]-1] if action[3] > 0 else None
+        equipment_idxs = [action[4]-1] if action[4] > 0 else None
         response_target_id = action[5]
-        await self.game.play_action(
-            main_action.id,
+
+        success = await self.game.play_action(
+            main_action_idx,
             target_asset_id,
-            attack_mask=attack_mask,
-            support_action_ids=support_action_ids,
-            equipment_ids=equipment_ids,
+            attack_mask_idx=attack_mask,
+            support_action_idxs=support_action_idxs,
+            equipment_idxs=equipment_idxs,
             response_target_id=response_target_id
         )
+
+        return success
         
 
     def step(self, action: Tuple[int]):
@@ -1235,6 +1253,7 @@ class PenQuestEnv(gym.Env):
         async def step(action: Tuple[int]):
             terminated = False
             truncated = False
+            success = True
 
             assert action in self.action_space
             if action not in self.valid_actions:
@@ -1248,22 +1267,22 @@ class PenQuestEnv(gym.Env):
             try:
                 # depending on the interaction type, process the action of the agent
                 if self.last_interaction_type == GameInteractionType.SHOPPING_PHASE:
-                    await self._shop_equipment(action)
+                    success = await self._shop_equipment(action)
                 elif self.last_interaction_type == GameInteractionType.CHOOSE_ACTION:
-                    await self._choose_action(action)
+                    success = await self._choose_action(action)
                 elif self.last_interaction_type == GameInteractionType.PLAY_CARD:
-                    await self._play_card(action)
+                    success = await self._play_card(action)
                 elif self.last_interaction_type == GameInteractionType.END:
-                    get_logger(__name__).debug(f"Interactions ended")
+                    self.game.logger.debug(f"Interactions ended")
                     truncated = True
                 else:
-                    get_logger(__name__).error(
+                    self.game.logger.error(
                         f"Unknown interaction type {self.last_interaction_type}"
                     )
             except asyncio.TimeoutError as e:
-                get_logger(__name__).error(
+                self.game.logger.error(
                     f"Error while waiting for action to be processed in step "
-                    f"{self.step_num} in game {self.game.game_state.name}: "
+                    f"{self.step_num} in game {self.game.code}: "
                     f"{e}"
                 )
                 await self.game.close()
@@ -1278,12 +1297,20 @@ class PenQuestEnv(gym.Env):
             # Finally the game can be left.
 
             # generate next observation
-            if self.last_interaction_type != GameInteractionType.END:
+            if success and self.last_interaction_type != GameInteractionType.END:
                 try:
                     interaction_type = await self.game.next_interaction_type()
+                    # TODO: implement not single turn functionality
+                    if self.single_turn:
+                        if interaction_type == GameInteractionType.PLAY_CARD:
+                            if self.game.game_state.actions_played_this_turn > 0 or\
+                                (self.game.game_state.game_phase == GamePhase.DefenderPreSetup and \
+                                 self.game.game_state.playable_actions.size == 0):
+                                await self.game.finish_turn()
+                                interaction_type = await self.game.next_interaction_type()
                     self.last_interaction_type = interaction_type
                 except asyncio.TimeoutError as e:
-                    get_logger(__name__).error(
+                    self.game.logger.error(
                         f"Error while waiting for shop in step {self.step_num}:"
                         f" {e}"
                     )
@@ -1302,7 +1329,7 @@ class PenQuestEnv(gym.Env):
                     get_valid_actions=self.last_interaction_type != GameInteractionType.END
                 )
             except asyncio.TimeoutError as e:
-                get_logger(__name__).error(
+                self.game.logger.error(
                     f"Error while waiting for valid actions in step "
                     f"{self.step_num} in game {self.game.game_state.name}: "
                     f"{e}"

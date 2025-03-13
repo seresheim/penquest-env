@@ -9,10 +9,16 @@ from typing import (
     Any,
     Callable
 )
+import logging
 
 from penquest_env.network.WebsocketConnector import WebsocketConnector
 
-from penquest_pkgs.utils import get_logger, parse_stream, write_msg
+from penquest_pkgs.utils import (
+    get_logger, 
+    parse_stream, 
+    write_stream, 
+    LOG_LEVEL_NETWORK
+)
 from penquest_pkgs.game import InputEvents
 
 
@@ -168,7 +174,8 @@ class SessionMiddleware:
             server = await asyncio.start_server(
                 self._client_connected, 
                 'localhost', 
-                self.internal_port
+                self.internal_port,
+                limit = 1024*512
             )
             get_logger(__name__).debug(
                 "SessionMiddleware now listening for incoming local socket "
@@ -260,14 +267,27 @@ class SessionMiddleware:
                 f"Start handling messages for env({env_id}) after "
                 f"connection established"
             )
-        async for msg_type, msg in parse_stream(reader):
-            get_logger(__name__).debug(
-                f"Received a message for env({env_id}) in SessionMiddleware"
+        try:
+            async for p in parse_stream(reader):
+                conn_id, msg_type, msg = p
+                get_logger(__name__, connection_id=conn_id).log(
+                    LOG_LEVEL_NETWORK,
+                    f"Received a message for env({env_id}) in SessionMiddleware"
+                )
+                if msg is None:
+                    get_logger(__name__).debug(
+                        "received None message in SessionMiddleware coming from"
+                        " the environment"
+                    )
+                    break
+                await self.pack_outgoing_messages(env_id, msg_type, msg)
+        except asyncio.CancelledError:
+            get_logger(__name__, connection_id=env_id).info(
+                f"handling messages for env({env_id}) in SessionMiddleware "
+                "cancelled"
             )
-            if msg is None:
-                break
-            await self.pack_outgoing_messages(env_id, msg_type, msg)
-        await self._close_connection(env_id)
+        finally:
+            await self._close_connection(env_id)
     
     async def _close_connection(self, env_id: int):
         """Closes a connection to an environment process and unrgesiters it
@@ -278,12 +298,14 @@ class SessionMiddleware:
             connection_id = self._con_ids[env_id]
             if connection_id in self._envs:
                 _, input_channel, output_channel = self._envs[connection_id]
-                input_channel.feed_eof()
+                #input_channel.feed_eof()
                 output_channel.write_eof()
+                await output_channel.drain()
                 output_channel.close()
+                await output_channel.wait_closed()
                 del self._envs[connection_id]
             del self._con_ids[env_id]
-            get_logger(__name__).info(
+            get_logger(__name__, connection_id=connection_id).info(
                     f"connection to env {env_id} with connection_id "
                     f"{connection_id} in websocket process closed"
                 )
@@ -294,15 +316,17 @@ class SessionMiddleware:
                 self._check_for_connections
             )
     
-    def _close_all_connections(self):
+    async def _close_all_connections(self):
         """Closes the connections to all registered environment processes.
         This method is usually invoked after the websocket connection got 
         destroyed
         """
         for env_id, input_stream, output_stream in self._envs.values():
-            input_stream.feed_eof()
+            #input_stream.feed_eof()
             output_stream.write_eof()
+            await output_stream.drain()
             output_stream.close()
+            await output_stream.wait_closed()
         if self._serving_coroutine is not None:
             self._serving_coroutine.close()
             self._serving_coroutine = None
@@ -337,7 +361,12 @@ class SessionMiddleware:
         """
         async for msg in input_channel:
             try:
-                if msg is None: break
+                if msg is None: 
+                    get_logger(__name__).debug(
+                        "received None message in SessionMiddleware coming from"
+                        " the websocket"
+                    )
+                    break
 
                 # Check if message is valid
                 required_fields = [FIELD_CONNECTION_ID, FIELD_DATA]
@@ -369,7 +398,7 @@ class SessionMiddleware:
                             self._con_ids[env_id] = new_connection_id
                             del self._envs[connection_id]
                             connection_id = new_connection_id
-                            get_logger(__name__).info(
+                            get_logger(__name__, connection_id=connection_id).info(
                                 f"updated connection_id '{old_connection_id}' "
                                 f"to '{new_connection_id}'"
                             )
@@ -377,9 +406,9 @@ class SessionMiddleware:
                 # Route data to the correct channel
                 if connection_id in self._envs:
                     (_, input_stream, output_stream) = self._envs[connection_id]
-                    await write_msg(data, output_stream)
+                    await write_stream(data, output_stream)
                 else:
-                    get_logger(__name__).warning(
+                    get_logger(__name__, connection_id=connection_id).warning(
                         f"received message for unknon connection id: "
                         f"'{connection_id}', message: '{data}'"
                     )
@@ -388,5 +417,7 @@ class SessionMiddleware:
                 # print Stacktrace
                 import traceback
                 traceback.print_exc()
+                print("Printing the real long traceback now:")
+                traceback.print_tb(e.__traceback__)
                 continue
-        self._close_all_connections()
+        await self._close_all_connections()

@@ -2,10 +2,10 @@ import asyncio
 import json
 import websockets
 
-from websockets import WebSocketClientProtocol
+from websockets import ClientConnection, State
 from typing import Any, Dict, AsyncGenerator, Tuple
 
-from penquest_pkgs.utils import get_logger, EnumEncoder
+from penquest_pkgs.utils import get_logger, EnumEncoder, LOG_LEVEL_NETWORK
 
 FIELD_AUTHORIZATION_HEADER = "Authorization"
 
@@ -19,7 +19,12 @@ async def stream_queue(queue: asyncio.Queue):
     while True:
         msg = await queue.get()
         yield msg
-        if msg is None: break
+        if msg is None:
+            get_logger(__name__).debug(
+                "received None message in WebsocketConnector coming from"
+                " the websocket"
+            ) 
+            break
 
 class WebsocketConnector():
     """Handles the websocket connection from the environment to the PenQuest
@@ -72,7 +77,7 @@ class WebsocketConnector():
         self.port = port if port is not None else DEFAULT_PORT
         self._send_queue = asyncio.Queue()
         self._message_queue = asyncio.Queue()
-        self._connection: WebSocketClientProtocol = None
+        self._connection: ClientConnection = None
         self._listening_task: asyncio.Task = None
         self._sending_task: asyncio.Task = None
         
@@ -93,10 +98,13 @@ class WebsocketConnector():
 
         :param api_key: key that is used to authenticate the user
         """
-        uri = f"ws://{self.host}:{self.port}/ws"
+        uri = f"wss://{self.host}/env-ws"
+        get_logger(__name__).debug(
+                f"Connecting to endpoint {uri} ..."
+            )
         self._connection = await websockets.connect(
-            uri, 
-            extra_headers={FIELD_AUTHORIZATION_HEADER: api_key}
+            uri,
+            additional_headers={FIELD_AUTHORIZATION_HEADER: api_key}
         )
         # Start listening to incoming messages and sending outgoing messages
         await self._start_tasks()
@@ -107,7 +115,7 @@ class WebsocketConnector():
 
         :return: True if connected, False otherwise
         """
-        return self._connection is not None and self._connection.open
+        return self._connection is not None and self._connection.state == State.OPEN
 
     async def _start_tasks(self):
         """Starts the listening tasks, which forward messages from the 
@@ -121,6 +129,7 @@ class WebsocketConnector():
         """Disconnects the current websocket connection if connected."""
         if self._connection is not None and self._connection.open:
             await self._connection.close()
+            await self._connection.wait_closed()
 
     async def _disconnected(self):
         """Ends the forwarding of messages from the websocket connection to the
@@ -157,7 +166,7 @@ class WebsocketConnector():
                 await self._handle_message(message)
         except websockets.ConnectionClosedError as e:
             if e.code !=  1000: # not OK
-                get_logger(__name__).warn(
+                get_logger(__name__).warning(
                     f"Connection closed abruptly: {str(e)}; code: {e.code}"
                 )
         finally:
@@ -170,7 +179,7 @@ class WebsocketConnector():
         :param message: message coming from the websocket connection
         """
         try:
-            get_logger(__name__).debug(f"Received '{message}' over websocket")
+            get_logger(__name__).log(LOG_LEVEL_NETWORK, f"Received '{message}' over websocket")
             if message is None:
                 raise ValueError("Empty message")
             parsed_message = json.loads(message)
@@ -187,7 +196,10 @@ class WebsocketConnector():
             if message is None: break
             if not isinstance(message, str):
                 message = json.dumps(message, cls=EnumEncoder)
-            get_logger(__name__).debug(f"Sent '{message}' over websocket")
+            get_logger(__name__).log(
+                LOG_LEVEL_NETWORK, 
+                f"Sent '{message}' over websocket"
+            )
             await self._connection.send(message)
         if self._connection.open:
             await self.disconnect()

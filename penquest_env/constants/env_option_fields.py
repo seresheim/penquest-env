@@ -1,0 +1,12 @@
+class OptionFields():
+    SCENARIO = "scenario"
+    SLOT = "slot"
+    GAME_OPTIONS = "game_options"
+    PLAYERS = "players"
+    TYPE = "type"
+    BOT_TYPE = "bot_type"
+    SEED = "seed"
+    GOAL = "goal"
+    SCENARIOS = "scenarios"
+    JOIN_CODE = "join_code"
+    WAIT_FOR_PLAYERS = "wait_for_players"

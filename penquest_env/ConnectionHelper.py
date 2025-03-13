@@ -1,5 +1,5 @@
 from penquest_pkgs.utils import retrieve_value_from_config, get_logger
-from penquest_pkgs.game import Game, GameInputInterpreter, GameOutputInterpreter
+from penquest_pkgs.game import Game
 
 from typing import Tuple
 
@@ -40,7 +40,8 @@ class ConnectionHelper:
             try:
                 input_stream, output_stream  = await asyncio.open_connection(
                     'localhost', 
-                    port
+                    port,
+                    limit = 1024*512
                 )
             except ConnectionRefusedError:
                 tries += 1
@@ -81,12 +82,9 @@ class ConnectionHelper:
         output_stream.writelines([encoded_payload])
         await output_stream.drain()
 
-        self.in_interpreter = GameInputInterpreter(input_stream)
-        self.out_interpreter = GameOutputInterpreter(output_stream)
-        await self.in_interpreter.start_listening_job(self.game)
-        await self.out_interpreter.start_listening_to_game_events(self.game)
+        await self.game.start_listening(input_stream, output_stream)
         await self.game.request_connection_id()
         get_logger(__name__).debug(
             f"Established connection with connection_id "
-            f"'{self.game.actor_connection_id}'"
+            f"'{self.game.connection_id}'"
         )
