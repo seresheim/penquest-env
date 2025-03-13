@@ -1,26 +1,12 @@
-import os
 import multiprocessing
-import configparser
 
 from penquest_env.network.SessionMiddleware import SessionMiddleware
-from penquest_pkgs.utils import retrieve_value_from_config
-
-DEFAULT_CONFIG_FILE = "default_config.ini"
-
-FIELD_INTERNAL = "internal"
-FIELD_EXTERNAL = "external"
-FIELD_TIMEOUTS = "timeouts"
-FIELD_API_KEY = "api_key"
-FIELD_HOST = "host"
-FIELD_PORT = "port"
-FIELD_CON_START = "connection_start"
-FIELD_CON_RESTART = "connection_restart"
+from penquest_env.utils.config_loader import Config, ConfigLoader
 
 
 def start(
-        api_key: str=None, 
-        host: str=None, 
-        port: int=None, 
+        api_key: str=None,
+        host: str=None,
         config_file_path: str=None
     ):
     """Starts a separate process that handles the websocket connection to the 
@@ -42,105 +28,21 @@ def start(
         Defaults to a default configuration file within the package called 
         'default_config.ini'
     """
-    if config_file_path is None:
-        full_path = os.path.dirname(os.path.abspath(__file__))
-        full_path = full_path.replace(
-            f"{os.path.sep}penquest_env{os.path.sep}network", 
-            f"{os.path.sep}"
-        )
-        config_file_path = os.path.join(full_path, DEFAULT_CONFIG_FILE)
-
-    config = configparser.ConfigParser()
-    config.read(config_file_path)
-    api_key = retrieve_value_from_config(
-        config, 
-        FIELD_EXTERNAL, 
-        FIELD_API_KEY, 
-        str,
-        "API key",
-        parameter=api_key
-    )
-    external_host = retrieve_value_from_config(
-        config, 
-        FIELD_EXTERNAL, 
-        FIELD_HOST, 
-        str,
-        "host",
-        parameter=host
-    )
-    external_port = retrieve_value_from_config(
-        config, 
-        FIELD_EXTERNAL, 
-        FIELD_PORT, 
-        int,
-        "port",
-        parameter=port
-    )
-    internal_port = retrieve_value_from_config(
-        config, 
-        FIELD_INTERNAL, 
-        FIELD_PORT, 
-        int,
-        "internal port",
-    )
-    timeout_con_start = retrieve_value_from_config(
-        config, 
-        FIELD_TIMEOUTS, 
-        FIELD_CON_START, 
-        int,
-        "timeout connection start",
-    )
-    timeout_con_restart = retrieve_value_from_config(
-        config, 
-        FIELD_TIMEOUTS, 
-        FIELD_CON_RESTART, 
-        int,
-        "timeout connection restart",
-    )
-    
+    config = ConfigLoader.load_config(config_path=config_file_path)
+    if api_key is not None:
+        config.api_key = api_key
+    if host is not None:
+        config.host = host
     process = multiprocessing.Process(
-        target=_start, 
-        args=(
-            api_key, 
-            external_host, 
-            external_port, 
-            internal_port, 
-            timeout_con_start, 
-            timeout_con_restart
-        )
+        target=_start,
+        args=(config,)
     )
     process.start()
 
-def _start(
-        api_key: str, 
-        host: str, 
-        port: int, 
-        internal_port: int, 
-        timeout_con_start: int, 
-        timeout_con_restart: int
-    ):
+def _start(config: Config):
     """Initial method of the websocket connection process
 
-    :param api_key: API key to authorize the client
-    :param host: host address of the PenQuest server to connect to. If this
-        value is None, defaults to the default config file. Defaults to 
-        None.
-    :param port: host port of the PenQuest server to connect to. If this
-        value is None, defaults to the default config file. Defaults to 
-        None.
-    :param internal_port: port that is used on the client machine to communicate
-        between the differen environment processes and the websocket process
-    :param timeout_con_start: timeout how long to wait for an environment 
-        process to connect at start
-    :param timeout_con_restart: timeout how long to wait for an environment 
-        process to connect after a game has ended
+    :param config: a Config object that contains all necessary information
     """
-    session = SessionMiddleware(
-        api_key, 
-        host, 
-        port, 
-        internal_port, 
-        timeout_con_start, 
-        timeout_con_restart
-    )
+    session = SessionMiddleware(config)
     session.start()

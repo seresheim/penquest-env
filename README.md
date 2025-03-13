@@ -11,7 +11,27 @@ Then install the this package, navigate into the folder and execute the followin
     pip install -e .
 ```
 
-Before execution please provide your API-Key via the environment variable
+The Penquest environment requires a 'default_config.ini' file. This might be
+already be present during installation and could be located in your environment
+at Lib/site-packages/penqest-pks. In case it is not, please create a 
+'default_config.ini' file in your working directory. In any other location,
+you need to provide the file path via the corresponding parameter.  
+  
+The content of 'default_config.ini' should look like this:
+```ini
+[internal]
+port = 50000
+
+[external]
+host = env.pen.quest
+api_key = ""
+
+[timeouts]
+connection_start = 300
+connection_restart = 2
+```
+
+Alternatively you can also provide the API key via the environment variable
 'API_KEY'. For your convenience this is best done via an '.env' file.
 
 Due to limited computation ressources, please contact the authors for an 

@@ -1,7 +1,6 @@
 import asyncio
 import signal
 from typing import (
-    Optional,
     Dict,
     Tuple,
     Coroutine,
@@ -9,17 +8,17 @@ from typing import (
     Any,
     Callable
 )
-import logging
-
-from penquest_env.network.WebsocketConnector import WebsocketConnector
 
 from penquest_pkgs.utils import (
-    get_logger, 
-    parse_stream, 
-    write_stream, 
+    get_logger,
+    parse_stream,
+    write_stream,
     LOG_LEVEL_NETWORK
 )
 from penquest_pkgs.game import InputEvents
+
+from penquest_env.network.WebsocketConnector import WebsocketConnector
+from penquest_env.utils.config_loader import Config
 
 
 # Constants
@@ -113,31 +112,23 @@ class SessionMiddleware:
 
     _id_counter = 0
 
-    def get_id() -> int:
+    @classmethod
+    def get_id(cls) -> int:
         """Returns a unique identifier
 
         :return: unique id
         """
-        SessionMiddleware._id_counter += 1
-        return SessionMiddleware._id_counter
+        cls._id_counter += 1
+        return cls._id_counter
 
     # Constructor
-    def __init__(
-            self, 
-            api_key: str, 
-            host: str, 
-            port: int,
-            internal_port: int,
-            timeout_con_start: int,
-            timeout_con_restart: int
-        ):
-        self.api_key = api_key
-        self.host = host
-        self.port = port
-        self.internal_port = internal_port
-        self.timeout_con_start = timeout_con_start
-        self.timeout_con_restart = timeout_con_restart
-        arguments = {"host": host, "port": port}
+    def __init__(self, config: Config):
+        self.api_key = config.api_key
+        self.host = config.host
+        self.internal_port = config.internal_port
+        self.timeout_con_start = config.timeout_connection_start
+        self.timeout_con_restart = config.timeout_connection_restart
+        arguments = {"host": self.host}
         self._websocket = WebsocketConnector.get_connector(arguments)
         self._envs: Dict[str, Tuple[int, asyncio.StreamReader, asyncio.StreamWriter]] = {}
         self._con_ids: Dict[int, str] = {}
@@ -146,7 +137,7 @@ class SessionMiddleware:
         self._serving_coroutine: Coroutine = None
         self._idle_cancelation_timer: Timer = None
 
-    def start(self): 
+    def start(self):
         """Installs a listener for process signaling (SIGTERM) and starts the
         listening coroutine on the local socket
         """

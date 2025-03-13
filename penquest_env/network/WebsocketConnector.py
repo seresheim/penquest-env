@@ -1,10 +1,9 @@
 import asyncio
 import json
-import websockets
-
-from websockets import ClientConnection, State
 from typing import Any, Dict, AsyncGenerator, Tuple
 
+import websockets
+from websockets import ClientConnection, State
 from penquest_pkgs.utils import get_logger, EnumEncoder, LOG_LEVEL_NETWORK
 
 FIELD_AUTHORIZATION_HEADER = "Authorization"
@@ -13,7 +12,6 @@ MSG_HELLO = "hello"
 MSG_DATA = "data"
 
 DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 5001
 
 async def stream_queue(queue: asyncio.Queue):
     while True:
@@ -55,7 +53,6 @@ class WebsocketConnector():
         """
         default_values = {
             'host': DEFAULT_HOST,
-            'port': DEFAULT_PORT,
         }
 
         connection_args = {**default_values, **connection_args}
@@ -64,7 +61,6 @@ class WebsocketConnector():
     def __init__(
             self,
             host: str = DEFAULT_HOST,
-            port: int = DEFAULT_PORT
         ):
         """Initializes all attributes.
 
@@ -74,7 +70,6 @@ class WebsocketConnector():
             defaults to DEFAULT_PORT
         """
         self.host = host if host is not None else DEFAULT_HOST
-        self.port = port if port is not None else DEFAULT_PORT
         self._send_queue = asyncio.Queue()
         self._message_queue = asyncio.Queue()
         self._connection: ClientConnection = None
@@ -147,7 +142,7 @@ class WebsocketConnector():
             await self._sending_task
         if self._connection.closed:
             get_logger(__name__).info(
-                f"Websocket connection to {self.host}:{self.port} closed"
+                f"Websocket connection to {self.host} closed"
             )
 
     async def _receiveing_routine(self):

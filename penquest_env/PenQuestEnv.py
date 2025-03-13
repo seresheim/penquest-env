@@ -1,4 +1,3 @@
-import os
 import asyncio
 from itertools import permutations, combinations
 from typing import Dict, Optional, Tuple, Set, Any
@@ -26,6 +25,7 @@ from penquest_pkgs.model import GameOptionsModel as GameOptions
 from penquest_env.constants import BotType, PlayerType, OptionFields, SlotType
 from penquest_env.ConnectionHelper import ConnectionHelper
 from penquest_env.ObservationFactory import ObservationFactory
+from penquest_env.utils.config_loader import ConfigLoader
 
 DEFAULT_WAIT_FOR_PLAYERS_PERIOD = 30
 MAX_AMOUNT_OF_TURNS = int(1e10)
@@ -688,15 +688,7 @@ class PenQuestEnv(gym.Env):
         self.step_num: int = 0
         self.valid_actions: Set[Tuple] = {}
 
-        if config_file_path is None:
-            full_path = os.path.dirname(os.path.abspath(__file__))
-            full_path = full_path.replace(
-                f"{os.path.sep}penquest_env{os.path.sep}penquest_env",
-                f"{os.path.sep}penquest_env"
-            )
-            config_file_path = os.path.join(full_path, DEFAULT_CONFIG_FILE)
-
-        self.config_file_path = config_file_path
+        self.config = ConfigLoader.load_config(config_path=config_file_path)
         self.options = options
         game_options = self.options.get(OptionFields.GAME_OPTIONS, GameOptions())
         if game_options.initial_action_mode == InitActionsMode.PICK:
@@ -1025,7 +1017,7 @@ class PenQuestEnv(gym.Env):
             self.game = Game()
             self.connector = ConnectionHelper(self.game)
             self.obs_factory = ObservationFactory()
-            await self.connector.connect_to_server(self.config_file_path)
+            await self.connector.connect_to_server(self.config)
             logger = self.game.logger if self.game is not None else get_logger(__name__)
 
             done = False

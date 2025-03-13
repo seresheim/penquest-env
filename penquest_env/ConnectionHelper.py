@@ -1,15 +1,12 @@
-from penquest_pkgs.utils import retrieve_value_from_config, get_logger
-from penquest_pkgs.game import Game
-
 from typing import Tuple
-
 import asyncio
 import time
-import configparser
 import uuid
 
-CONFIG_FIELD_INTERNAL = "internal"
-CONFIG_FIELD_PORT = "port"
+from penquest_pkgs.utils import get_logger
+from penquest_pkgs.game import Game
+
+from penquest_env.utils.config_loader import Config
 
 class ConnectionHelper:
 
@@ -53,27 +50,19 @@ class ConnectionHelper:
         
         return input_stream, output_stream
 
-    async def connect_to_server(self, config_file_path :str):
+    async def connect_to_server(self, config :Config):
         """Initiates a connection for the current environment with the 
         subprocess that handles the websocket connection
 
-        :param config_file_path: file path to a configuarion file that stores
-            stores the internal port over which the environment communicates
+        :param config: configuarion object that stores
+            the internal port over which the environment communicates
             with the websocket process
         """
         get_logger(__name__).debug("Connect env to server ...")
 
-        config = configparser.ConfigParser()
-        config.read(config_file_path)
-        port = retrieve_value_from_config(
-            config, 
-            CONFIG_FIELD_INTERNAL, 
-            CONFIG_FIELD_PORT, 
-            int,
-            "internal port",
+        input_stream, output_stream = await self._try_connect_process(
+            config.internal_port
         )
-
-        input_stream, output_stream = await self._try_connect_process(port)
         temporary_connection_id = f"env-{uuid.uuid4()}"
 
         # send temporary connection id to ws process
