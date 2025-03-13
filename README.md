@@ -27,6 +27,7 @@ import random as rand
 import os
 import gymnasium as gym
 import penquest_env
+from penquest_env import Scenario, SlotType, PlayerType, BotType
 
 api_key = os.getenv("API_KEY")
 OPTIONS = {
