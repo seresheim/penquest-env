@@ -11,7 +11,7 @@ setup(
     packages=find_namespace_packages(exclude=["build*", "dist*", "logs*"]),
     install_requires=[
         "asyncio>=3.4.3",
-        "gymnasium>=0.29",
+        "gymnasium>=1.1.1",
         "websockets>=12.0",
         "penquest-pkgs>=0.2.0",
     ],
