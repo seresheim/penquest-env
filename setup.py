@@ -2,7 +2,7 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name="penquest-env",
-    version="0.2.0",
+    version="0.2.1",
     description="A reinforcement learning environment for the digital board game PenQuest.",
     url="https://www.pen.quest",
     author="Sebastian Eresheim, Alexander Piglmann, Simon Gmeiner, Thomas Petelin",

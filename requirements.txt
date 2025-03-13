@@ -1,4 +1,4 @@
 asyncio>=3.4.3
 gymnasium>=0.29
 websockets>=12.0
-penquest-pkgs=0.2.0
+penquest-pkgs==0.2.1
