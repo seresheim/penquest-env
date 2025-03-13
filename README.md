@@ -16,3 +16,36 @@ Before execution please provide your API-Key via the environment variable
 
 Due to limited computation ressources, please contact the authors for an 
 API key to access the PenQuest API.
+
+## Usage
+
+The following is a minimal viable example usage of the environment for random 
+actions:
+
+```python
+import random as rand
+import os
+import gymnasium as gym
+import penquest_env
+
+api_key = os.getenv("API_KEY")
+OPTIONS = {
+    "scenario": Scenario.INFRASTRUCUTRE_SCENARIO_MEDIUM_1_ALL_ACTIONS,
+    'slot': SlotType.ATTACK,
+    'seed': 1234,
+    'players': [
+        { 'type': PlayerType.BOT, 'bot_type': BotType.ADVANCED_BOT },
+    ],
+}
+
+if __name__ == "__main__":
+    penquest_env.start(api_key)
+    env = gym.make('penquest_env/PenQuest-v0', options=OPTIONS)
+    obs, info = env.reset(options=OPTIONS)
+    done = False
+    while not done:
+        action = rand.choice(info["valid_actions"])
+        obs, reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+    env.close()
+```
