@@ -2,7 +2,7 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name="penquest-env",
-    version="0.2.1",
+    version="0.2.2",
     description="A reinforcement learning environment for the digital board game PenQuest.",
     url="https://www.pen.quest",
     author="Sebastian Eresheim, Alexander Piglmann, Simon Gmeiner, Thomas Petelin",
@@ -13,7 +13,7 @@ setup(
         "asyncio>=3.4.3",
         "gymnasium>=1.1.1",
         "websockets>=12.0",
-        "penquest-pkgs==0.2.1",
+        "penquest-pkgs>=0.2.2",
         "bidict>=0.23.1",
     ],
     classifiers=[""]

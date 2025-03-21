@@ -21,7 +21,7 @@ from penquest_env.constants import Scenario, SlotType, PlayerType, BotType
 from penquest_env.PenQuestEnv import PenQuestEnv
 from penquest_env.network.connect import start
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 __author__ = "Sebastian Eresheim, Alexander Piglmann, Simon Gmeiner, Thomas Petelin"
 __credits__ = "PenQuest"
 
