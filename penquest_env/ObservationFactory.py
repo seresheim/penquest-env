@@ -99,12 +99,6 @@ MAP_GOAL_TYPES = {
     "defender_not_exceeded_actor_goal": 3
 }
 
-MAP_ATTACK_STAGES = {
-    'Reconnaissance': 1,
-    'Initial Access': 2,
-    'Execution': 3
-}
-
 PERMANENT_EQUIPMENT = {2, 5, 8, 9, 12}
 SINGLE_USE_EQUIPMENT = {1, 6, 7, 10, 11}
 ATTACK_EQUIPMENT = {3, 6, 7, 8}
@@ -209,7 +203,7 @@ class ObservationFactory():
                             "asset_id": goal.asset.id,
                             "damage": np.array(goal.damage),
                             "exposed": goal.exposed,
-                            "attack_stage": MAP_ATTACK_STAGES[goal.attack_stage] if goal.attack_stage is not None else 0,
+                            "attack_stage": goal.attack_stage if goal.attack_stage is not None else 0,
                             "credits": np.array([0.0], dtype=np.float32),
                             "ins": 0,
                             "defender": 0
